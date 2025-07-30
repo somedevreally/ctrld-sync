@@ -211,6 +211,7 @@ def create_folder(profile_id: str, name: str, do: int, status: int) -> Optional[
     Create a new folder and return its ID.
     The API returns the full list of groups, so we look for the one we just added.
     """
+    prefixed_name = f"HA-{name}"  # Add HA- prefix to folder name
     try:
         _api_post(
             f"{API_BASE}/{profile_id}/groups",
