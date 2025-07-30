@@ -8,7 +8,7 @@ remote block-lists.
 It does three things:
 1. Reads the folder names from the JSON files.
 2. Deletes any existing folders with those names (so we start fresh).
-3. Re-creates the folders and pushes all rules in batches.
+3. Re-creates the folders with HA- prefix and pushes all rules in batches.
 
 Nothing fancy, just works.
 """
@@ -82,26 +82,21 @@ _gh = httpx.Client(timeout=30)
 # simple in-memory cache: url -> decoded JSON
 _cache: Dict[str, Dict] = {}
 
-
 def _api_get(url: str) -> httpx.Response:
     """GET helper for Control-D API with retries."""
     return _retry_request(lambda: _api.get(url))
-
 
 def _api_delete(url: str) -> httpx.Response:
     """DELETE helper for Control-D API with retries."""
     return _retry_request(lambda: _api.delete(url))
 
-
 def _api_post(url: str, data: Dict) -> httpx.Response:
     """POST helper for Control-D API with retries."""
     return _retry_request(lambda: _api.post(url, data=data))
 
-
 def _api_post_form(url: str, data: Dict) -> httpx.Response:
     """POST helper for form data with retries."""
     return _retry_request(lambda: _api.post(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}))
-
 
 def _retry_request(request_func, max_retries=MAX_RETRIES, delay=RETRY_DELAY):
     """Retry a request function with exponential backoff."""
@@ -112,14 +107,12 @@ def _retry_request(request_func, max_retries=MAX_RETRIES, delay=RETRY_DELAY):
             return response
         except (httpx.HTTPError, httpx.TimeoutException) as e:
             if attempt == max_retries - 1:
-                # Log the response content if available
                 if hasattr(e, 'response') and e.response is not None:
                     log.error(f"Response content: {e.response.text}")
                 raise
             wait_time = delay * (2 ** attempt)
             log.warning(f"Request failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s...")
             time.sleep(wait_time)
-
 
 def _gh_get(url: str) -> Dict:
     """Fetch JSON from GitHub (cached)."""
@@ -128,7 +121,6 @@ def _gh_get(url: str) -> Dict:
         r.raise_for_status()
         _cache[url] = r.json()
     return _cache[url]
-
 
 def list_existing_folders(profile_id: str) -> Dict[str, str]:
     """Return folder-name -> folder-id mapping."""
@@ -143,7 +135,6 @@ def list_existing_folders(profile_id: str) -> Dict[str, str]:
     except (httpx.HTTPError, KeyError) as e:
         log.error(f"Failed to list existing folders: {e}")
         return {}
-
 
 def get_all_existing_rules(profile_id: str) -> Set[str]:
     """Get all existing rules from all folders in the profile."""
@@ -188,12 +179,10 @@ def get_all_existing_rules(profile_id: str) -> Set[str]:
         log.error(f"Failed to get existing rules: {e}")
         return set()
 
-
 def fetch_folder_data(url: str) -> Dict[str, Any]:
     """Return folder data from GitHub JSON."""
     js = _gh_get(url)
     return js
-
 
 def delete_folder(profile_id: str, name: str, folder_id: str) -> bool:
     """Delete a single folder by its ID. Returns True if successful."""
@@ -205,32 +194,31 @@ def delete_folder(profile_id: str, name: str, folder_id: str) -> bool:
         log.error(f"Failed to delete folder '{name}' (ID {folder_id}): {e}")
         return False
 
-
 def create_folder(profile_id: str, name: str, do: int, status: int) -> Optional[str]:
     """
-    Create a new folder and return its ID.
+    Create a new folder with HA- prefix and return its ID.
     The API returns the full list of groups, so we look for the one we just added.
     """
+    prefixed_name = f"HA-{name}"
     try:
         _api_post(
             f"{API_BASE}/{profile_id}/groups",
-            data={"name": name, "do": do, "status": status},
+            data={"name": prefixed_name, "do": do, "status": status},
         )
         
         # Re-fetch the list and pick the folder we just created
         data = _api_get(f"{API_BASE}/{profile_id}/groups").json()
         for grp in data["body"]["groups"]:
-            if grp["group"].strip() == name.strip():
-                log.info("Created folder '%s' (ID %s)", name, grp["PK"])
+            if grp["group"].strip() == prefixed_name.strip():
+                log.info("Created folder '%s' (ID %s)", prefixed_name, grp["PK"])
                 time.sleep(FOLDER_CREATION_DELAY)
                 return str(grp["PK"])
         
-        log.error(f"Folder '{name}' was not found after creation")
+        log.error(f"Folder '{prefixed_name}' was not found after creation")
         return None
     except (httpx.HTTPError, KeyError) as e:
-        log.error(f"Failed to create folder '{name}': {e}")
+        log.error(f"Failed to create folder '{prefixed_name}': {e}")
         return None
-
 
 def push_rules(
     profile_id: str,
@@ -242,8 +230,9 @@ def push_rules(
     existing_rules: Set[str],
 ) -> bool:
     """Push hostnames in batches to the given folder, skipping duplicates. Returns True if successful."""
+    prefixed_folder_name = f"HA-{folder_name}"
     if not hostnames:
-        log.info("Folder '%s' - no rules to push", folder_name)
+        log.info("Folder '%s' - no rules to push", prefixed_folder_name)
         return True
     
     # Filter out duplicates
@@ -252,10 +241,10 @@ def push_rules(
     duplicates_count = original_count - len(filtered_hostnames)
     
     if duplicates_count > 0:
-        log.info(f"Folder '{folder_name}': skipping {duplicates_count} duplicate rules")
+        log.info(f"Folder '{prefixed_folder_name}': skipping {duplicates_count} duplicate rules")
     
     if not filtered_hostnames:
-        log.info(f"Folder '{folder_name}' - no new rules to push after filtering duplicates")
+        log.info(f"Folder '{prefixed_folder_name}' - no new rules to push after filtering duplicates")
         return True
     
     successful_batches = 0
@@ -280,7 +269,7 @@ def push_rules(
             )
             log.info(
                 "Folder '%s' – batch %d: added %d rules",
-                folder_name,
+                prefixed_folder_name,
                 i,
                 len(batch),
             )
@@ -290,23 +279,22 @@ def push_rules(
             existing_rules.update(batch)
             
         except httpx.HTTPError as e:
-            log.error(f"Failed to push batch {i} for folder '{folder_name}': {e}")
+            log.error(f"Failed to push batch {i} for folder '{prefixed_folder_name}': {e}")
             if hasattr(e, 'response') and e.response is not None:
                 log.error(f"Response content: {e.response.text}")
     
     if successful_batches == total_batches:
-        log.info("Folder '%s' – finished (%d new rules added)", folder_name, len(filtered_hostnames))
+        log.info("Folder '%s' – finished (%d new rules added)", prefixed_folder_name, len(filtered_hostnames))
         return True
     else:
         log.error(f"Folder '%s' – only {successful_batches}/{total_batches} batches succeeded")
         return False
 
-
 # --------------------------------------------------------------------------- #
 # 4. Main workflow
 # --------------------------------------------------------------------------- #
 def sync_profile(profile_id: str) -> bool:
-    """One-shot sync: delete old, create new, push rules. Returns True if successful."""
+    """One-shot sync: delete old, create new with HA- prefix, push rules. Returns True if successful."""
     try:
         # Fetch all folder data first
         folder_data_list = []
@@ -325,8 +313,9 @@ def sync_profile(profile_id: str) -> bool:
         existing_folders = list_existing_folders(profile_id)
         for folder_data in folder_data_list:
             name = folder_data["group"]["group"].strip()
-            if name in existing_folders:
-                delete_folder(profile_id, name, existing_folders[name])
+            prefixed_name = f"HA-{name}"
+            if prefixed_name in existing_folders:
+                delete_folder(profile_id, prefixed_name, existing_folders[prefixed_name])
         
         # Get all existing rules AFTER deleting target folders
         existing_rules = get_all_existing_rules(profile_id)
@@ -343,18 +332,13 @@ def sync_profile(profile_id: str) -> bool:
             folder_id = create_folder(profile_id, name, do, status)
             if folder_id and push_rules(profile_id, name, folder_id, do, status, hostnames, existing_rules):
                 success_count += 1
-                # Note: existing_rules is updated within push_rules function
             
-            # Optional: Refresh existing rules after each folder (more thorough but slower)
-            # existing_rules = get_all_existing_rules(profile_id)
-        
         log.info(f"Sync complete: {success_count}/{len(folder_data_list)} folders processed successfully")
         return success_count == len(folder_data_list)
     
     except Exception as e:
         log.error(f"Unexpected error during sync for profile {profile_id}: {e}")
         return False
-
 
 # --------------------------------------------------------------------------- #
 # 5. Entry-point
@@ -372,7 +356,6 @@ def main():
     
     log.info(f"All profiles processed: {success_count}/{len(PROFILE_IDS)} successful")
     exit(0 if success_count == len(PROFILE_IDS) else 1)
-
 
 if __name__ == "__main__":
     main()
