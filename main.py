@@ -45,17 +45,17 @@ PROFILE_IDS = [p.strip() for p in os.getenv("PROFILE", "").split(",") if p.strip
 
 # URLs of the JSON block-lists we want to import
 FOLDER_URLS = [
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/badware-hoster-folder.json",
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/native-tracker-amazon-folder.json",
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/native-tracker-microsoft-folder.json",
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/native-tracker-samsung-folder.json",
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/native-tracker-tiktok-folder.json",
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/nosafesearch-folder.json",
- #   "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/spam-idns-folder.json",
-   # "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/spam-tlds-folder.json",
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/ultimate-known_issues-allow-folder.json",
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/native-tracker-tiktok-aggressive-folder.json",
-#   "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/controld/referral-allow-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/badware-hoster-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-amazon-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-microsoft-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-samsung-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-tiktok-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/nosafesearch-folder.json",
+ #   "https://hagezi-mirror.dnsbunker.org/controld/spam-idns-folder.json",
+   # "https://hagezi-mirror.dnsbunker.org/controld/spam-tlds-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/ultimate-known_issues-allow-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-tiktok-aggressive-folder.json",
+#   "https://hagezi-mirror.dnsbunker.org/controld/referral-allow-folder.json",
 ]
 
 BATCH_SIZE = 500
