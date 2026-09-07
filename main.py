@@ -51,11 +51,11 @@ FOLDER_URLS = [
     "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-samsung-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-tiktok-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/nosafesearch-folder.json",
- #   "https://hagezi-mirror.dnsbunker.org/controld/spam-idns-folder.json",
-   # "https://hagezi-mirror.dnsbunker.org/controld/spam-tlds-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/spam-idns-folder.json",
+    "https://hagezi-mirror.dnsbunker.org/controld/spam-tlds-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/ultimate-known_issues-allow-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-tiktok-aggressive-folder.json",
-   "https://hagezi-mirror.dnsbunker.org/controld/referral-allow-folder.json",
+   #"https://hagezi-mirror.dnsbunker.org/controld/referral-allow-folder.json",
 ]
 
 BATCH_SIZE = 500
