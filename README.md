@@ -44,11 +44,28 @@ https://controld.com/dashboard/profiles/741861frakbm/filters
    ```
 
 3. **Configure Folders**  
-   Edit the `FOLDER_URLS` list in `main.py` to include the URLs of the JSON block-lists you want to sync.
+   Edit the `FOLDER_URLS` list in `main.py` to include the lists you want to sync.
+
+   Each entry can be:
+
+   - **A string** — treated as a JSON block-list URL (original behavior).
+   - **A dict** — for plain-text lists (one domain per line) or to override settings:
+
+   ```python
+   {
+       "url": "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Whitelists/Filter",
+       "name": "ShadowWhisperer Filter",   # optional; derived from URL if omitted
+       "do": 1,                            # 0 = Block, 1 = Bypass/Allow (required for plain-text)
+       "status": 1,                        # optional, default 1 (enabled)
+       "format": "text",                   # optional; auto-detected if omitted
+   }
+   ```
+
+   Plain-text files skip blank lines and lines starting with `#`. Inline comments (`domain.com # reason`) are also stripped.
 
 > [!NOTE]
 > Currently only Folders with one action are supported.
-> Either "Block" or "Allow" actions are supported.
+> Either "Block" (`do: 0`) or "Allow/Bypass" (`do: 1`) actions are supported.
 
 4. **Run locally**
    ```bash
