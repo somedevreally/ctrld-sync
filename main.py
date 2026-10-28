@@ -68,7 +68,7 @@ FOLDER_URLS: List[Union[str, Dict[str, Any]]] = [
     #"https://hagezi-mirror.dnsbunker.org/controld/referral-allow-folder.json",
     # Example plain-text whitelist (one domain per line):
      {
-         "url": "https://github.com/ShadowWhisperer/BlockLists/blob/master/Whitelists/Whitelist",
+         "url": "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/refs/heads/master/Whitelists/Whitelist",
          "name": "ShadowWhisperer Filter",
          "do": 1,          # 1 = Bypass / Allow, 0 = Block
          "status": 1,
