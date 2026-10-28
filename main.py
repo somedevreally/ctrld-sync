@@ -17,6 +17,7 @@ import os
 import logging
 import time
 import json
+import re
 from typing import Dict, List, Optional, Any, Set, Union
 from urllib.parse import urlparse
 
@@ -68,9 +69,9 @@ FOLDER_URLS: List[Union[str, Dict[str, Any]]] = [
     #"https://hagezi-mirror.dnsbunker.org/controld/referral-allow-folder.json",
     # Example plain-text whitelist (one domain per line):
      {
-         "url": "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/refs/heads/master/Whitelists/Whitelist",
+         "url": "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Whitelists/Filter",
          "name": "ShadowWhisperer Filter",
-         "do": 1,          # 1 = Bypass / Allow, 0 = Block
+         "do": 1,          # 1 = Bypass / Allow
          "status": 1,
     #     "format": "text", # optional, auto-detected from content
      },
@@ -110,17 +111,36 @@ def _derive_name_from_url(url: str) -> str:
         name = name.rsplit(".", 1)[0]
     return name.replace("-", " ").replace("_", " ").strip().title() or "Unnamed List"
 
+# Basic hostname check (allows wildcards like *.example.com)
+_HOSTNAME_RE = re.compile(
+    r"^(?:\*\.)?(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
+)
+
 def _parse_text_domains(content: str) -> List[str]:
-    """Parse a plain-text list: one domain per line. Skips blanks and # comments."""
+    """Parse a plain-text list: one domain per line.
+
+    Skips blanks and lines starting with #.
+    Takes only the first whitespace-separated token as the domain
+    (so both 'domain.com # comment' and 'domain.com    free-form text' work).
+    Invalid hostnames are skipped with a warning.
+    """
     domains: List[str] = []
+    skipped = 0
     for raw in content.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        # Strip inline comments (domain.com # reason)
-        domain = line.split("#", 1)[0].strip()
-        if domain:
+        # First token only (domain), ignore the rest
+        domain = line.split(None, 1)[0]
+        if not domain:
+            continue
+        if _HOSTNAME_RE.match(domain):
             domains.append(domain)
+        else:
+            skipped += 1
+            log.warning("Skipping invalid hostname: %r", domain)
+    if skipped:
+        log.info("Skipped %d invalid hostname(s)", skipped)
     return domains
 
 def _fetch_raw(url: str) -> str:
@@ -389,7 +409,7 @@ def push_rules(
         log.info("Folder '%s' – finished (%d new rules added)", prefixed_folder_name, len(filtered_hostnames))
         return True
     else:
-        log.error(f"Folder '%s' – only {successful_batches}/{total_batches} batches succeeded")
+        log.error("Folder '%s' – only %d/%d batches succeeded", prefixed_folder_name, successful_batches, total_batches)
         return False
 
 # --------------------------------------------------------------------------- #
