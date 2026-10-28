@@ -6,7 +6,7 @@ A tiny helper that keeps your Control D folders in sync with a set of
 remote block-lists.
 
 It does three things:
-1. Reads the folder names from the JSON files.
+1. Reads the folder names from the configured lists (JSON or plain-text).
 2. Deletes any existing folders with those names (so we start fresh).
 3. Re-creates the folders with HA- prefix and pushes all rules in batches.
 
@@ -16,7 +16,9 @@ Nothing fancy, just works.
 import os
 import logging
 import time
-from typing import Dict, List, Optional, Any, Set
+import json
+from typing import Dict, List, Optional, Any, Set, Union
+from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
@@ -43,19 +45,35 @@ TOKEN = os.getenv("TOKEN")
 # Accept either a single profile id or a comma-separated list
 PROFILE_IDS = [p.strip() for p in os.getenv("PROFILE", "").split(",") if p.strip()]
 
-# URLs of the JSON block-lists we want to import
-FOLDER_URLS = [
+# URLs of the block-lists we want to import.
+# Each entry can be:
+#   - a string: treated as a JSON URL (existing behavior)
+#   - a dict with keys:
+#       url (required)
+#       name (optional, folder name; derived from URL if omitted)
+#       do (optional, 0=Block, 1=Bypass/Allow; required for plain-text lists)
+#       status (optional, default 1)
+#       format (optional, "json" or "text"; auto-detected if omitted)
+FOLDER_URLS: List[Union[str, Dict[str, Any]]] = [
     "https://hagezi-mirror.dnsbunker.org/controld/badware-hoster-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-amazon-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-microsoft-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-samsung-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-tiktok-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/nosafesearch-folder.json",
-   #"https://hagezi-mirror.dnsbunker.org/controld/spam-idns-folder.json",
-   #"https://hagezi-mirror.dnsbunker.org/controld/spam-tlds-folder.json",
-   # "https://hagezi-mirror.dnsbunker.org/controld/ultimate-known_issues-allow-folder.json",
+    #"https://hagezi-mirror.dnsbunker.org/controld/spam-idns-folder.json",
+    #"https://hagezi-mirror.dnsbunker.org/controld/spam-tlds-folder.json",
+    #"https://hagezi-mirror.dnsbunker.org/controld/ultimate-known_issues-allow-folder.json",
     "https://hagezi-mirror.dnsbunker.org/controld/native-tracker-tiktok-aggressive-folder.json",
-  #"https://hagezi-mirror.dnsbunker.org/controld/referral-allow-folder.json",
+    #"https://hagezi-mirror.dnsbunker.org/controld/referral-allow-folder.json",
+    # Example plain-text whitelist (one domain per line):
+     {
+         "url": "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Whitelists/Filter",
+         "name": "ShadowWhisperer Filter",
+         "do": 1,          # 1 = Bypass / Allow, 0 = Block
+         "status": 1,
+    #     "format": "text", # optional, auto-detected from content
+     },
 ]
 
 BATCH_SIZE = 500
@@ -81,8 +99,95 @@ _gh = httpx.Client(timeout=30)
 # --------------------------------------------------------------------------- #
 # 3. Helpers
 # --------------------------------------------------------------------------- #
-# simple in-memory cache: url -> decoded JSON
-_cache: Dict[str, Dict] = {}
+# simple in-memory cache: url -> raw text
+_cache: Dict[str, str] = {}
+
+def _derive_name_from_url(url: str) -> str:
+    """Derive a reasonable folder name from a URL path."""
+    path = urlparse(url).path.rstrip("/")
+    name = path.split("/")[-1] if path else "Unnamed"
+    if "." in name:
+        name = name.rsplit(".", 1)[0]
+    return name.replace("-", " ").replace("_", " ").strip().title() or "Unnamed List"
+
+def _parse_text_domains(content: str) -> List[str]:
+    """Parse a plain-text list: one domain per line. Skips blanks and # comments."""
+    domains: List[str] = []
+    for raw in content.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Strip inline comments (domain.com # reason)
+        domain = line.split("#", 1)[0].strip()
+        if domain:
+            domains.append(domain)
+    return domains
+
+def _fetch_raw(url: str) -> str:
+    """Fetch raw text content (cached)."""
+    if url not in _cache:
+        r = _gh.get(url)
+        r.raise_for_status()
+        _cache[url] = r.text
+    return _cache[url]
+
+def _normalize_entry(entry: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Turn a string or dict config entry into a normalized folder data dict."""
+    if isinstance(entry, str):
+        cfg = {"url": entry}
+    else:
+        cfg = entry.copy()
+
+    url = cfg["url"]
+    content = _fetch_raw(url)
+
+    # Auto-detect format
+    fmt = cfg.get("format")
+    if not fmt:
+        stripped = content.lstrip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            fmt = "json"
+        else:
+            fmt = "text"
+
+    if fmt == "json":
+        try:
+            data = json.loads(content)
+        except Exception as e:
+            raise ValueError(f"Failed to parse JSON from {url}: {e}") from e
+
+        # Allow name / do overrides even for JSON
+        if "name" in cfg:
+            data.setdefault("group", {})["group"] = cfg["name"]
+        if "do" in cfg or "status" in cfg:
+            action = data.setdefault("group", {}).setdefault("action", {})
+            if "do" in cfg:
+                action["do"] = cfg["do"]
+            if "status" in cfg:
+                action["status"] = cfg["status"]
+        return data
+
+    # Plain text
+    if "do" not in cfg:
+        raise ValueError(
+            f"Plain-text list '{url}' requires an explicit 'do' value "
+            "(0=Block, 1=Bypass/Allow) in its config entry."
+        )
+
+    name = cfg.get("name") or _derive_name_from_url(url)
+    do = int(cfg["do"])
+    status = int(cfg.get("status", 1))
+    domains = _parse_text_domains(content)
+
+    log.info("Parsed plain-text list '%s': %d domains", name, len(domains))
+
+    return {
+        "group": {
+            "group": name,
+            "action": {"do": do, "status": status},
+        },
+        "rules": [{"PK": d} for d in domains],
+    }
 
 def _api_get(url: str) -> httpx.Response:
     """GET helper for Control-D API with retries."""
@@ -117,12 +222,12 @@ def _retry_request(request_func, max_retries=MAX_RETRIES, delay=RETRY_DELAY):
             time.sleep(wait_time)
 
 def _gh_get(url: str) -> Dict:
-    """Fetch JSON from GitHub (cached)."""
-    if url not in _cache:
-        r = _gh.get(url)
-        r.raise_for_status()
-        _cache[url] = r.json()
-    return _cache[url]
+    """Deprecated – use _normalize_entry instead. Kept for compatibility."""
+    return _normalize_entry(url)
+
+def fetch_folder_data(url_or_cfg: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Return normalized folder data from a JSON URL or plain-text config."""
+    return _normalize_entry(url_or_cfg)
 
 def list_existing_folders(profile_id: str) -> Dict[str, str]:
     """Return folder-name -> folder-id mapping."""
@@ -180,11 +285,6 @@ def get_all_existing_rules(profile_id: str) -> Set[str]:
     except Exception as e:
         log.error(f"Failed to get existing rules: {e}")
         return set()
-
-def fetch_folder_data(url: str) -> Dict[str, Any]:
-    """Return folder data from GitHub JSON."""
-    js = _gh_get(url)
-    return js
 
 def delete_folder(profile_id: str, name: str, folder_id: str) -> bool:
     """Delete a single folder by its ID. Returns True if successful."""
@@ -300,11 +400,11 @@ def sync_profile(profile_id: str) -> bool:
     try:
         # Fetch all folder data first
         folder_data_list = []
-        for url in FOLDER_URLS:
+        for entry in FOLDER_URLS:
             try:
-                folder_data_list.append(fetch_folder_data(url))
-            except (httpx.HTTPError, KeyError) as e:
-                log.error(f"Failed to fetch folder data from {url}: {e}")
+                folder_data_list.append(fetch_folder_data(entry))
+            except (httpx.HTTPError, KeyError, ValueError) as e:
+                log.error(f"Failed to fetch folder data from {entry}: {e}")
                 continue
         
         if not folder_data_list:
